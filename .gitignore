@@ -1,5 +1,6 @@
 HELP.md
 .gradle
+.gradle-codex/
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
@@ -38,3 +39,9 @@ out/
 
 ### Kotlin ###
 .kotlin
+
+### Local application data and secrets ###
+/data/
+.env
+.env.*
+!.env.example
