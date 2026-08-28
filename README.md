@@ -110,12 +110,14 @@ Content-Type: application/json
     "accessTokenExpiresIn": 900,
     "refreshToken": "opaque refresh token",
     "userData": {
-      "userId": "Step Tune user UUID",
+      "userId": 1,
       "nickName": "스텝러너12345678"
     }
   }
 }
 ```
+
+`userId`는 문자열 UUID가 아니라 JSON 숫자입니다. Android 응답 DTO에서도 `String`이 아닌 `Long`으로 선언합니다. 최초 사용자는 `1`, 다음 신규 사용자는 `2`, `3` 순서로 발급됩니다.
 
 `accessTokenExpiresIn`은 액세스 토큰의 남은 유효 시간을 초 단위로 나타냅니다. `900`은 15분입니다. 신규 사용자는 `스텝러너`와 8자리 숫자를 조합한 중복 없는 닉네임을 자동으로 받고, 추후 프로필 API에서 변경할 수 있도록 확장합니다.
 
@@ -158,7 +160,7 @@ Content-Type: application/json
 ### 내 사용자 정보
 
 ```http
-GET /api/v1/me
+GET /api/v1/me/profile
 Authorization: Bearer Step-Tune-Access-Token
 ```
 
@@ -167,11 +169,72 @@ Authorization: Bearer Step-Tune-Access-Token
   "code": 200,
   "message": "success",
   "data": {
-    "userId": "Step Tune user UUID",
+    "userId": 1,
     "nickName": "스텝러너12345678"
   }
 }
 ```
+
+### 닉네임 중복 확인
+
+프로필 저장 버튼을 누르기 전에 입력한 닉네임을 사용할 수 있는지 확인합니다. `nickName`은 URL
+쿼리 값으로 전달하고 Access Token이 필요합니다. 서버는 앞뒤 공백을 제거한 값을 반환합니다.
+
+```http
+GET /api/v1/me/nickname/availability?nickName=새닉네임
+Authorization: Bearer Step-Tune-Access-Token
+```
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "nickName": "새닉네임",
+    "available": true
+  }
+}
+```
+
+중복 확인 결과는 닉네임을 예약하지 않습니다. 다른 사용자가 동시에 같은 값을 저장할 수 있으므로
+Android는 실제 변경 API에서 `409 Conflict`가 오는 경우도 중복 안내로 처리해야 합니다.
+
+### 닉네임 변경
+
+닉네임은 앞뒤 공백을 제외하고 1~30자여야 합니다.
+
+```http
+PATCH /api/v1/me/nickname
+Authorization: Bearer Step-Tune-Access-Token
+Content-Type: application/json
+
+{
+  "nickName": "새닉네임"
+}
+```
+
+성공하면 `GET /api/v1/me/profile`과 같은 사용자 정보가 반환됩니다. 다른 사용자가 이미 사용 중이면 다음처럼
+`409`가 반환됩니다.
+
+```json
+{
+  "code": 409,
+  "message": "Nickname is already in use",
+  "data": null
+}
+```
+
+### 회원 탈퇴
+
+```http
+DELETE /api/v1/me/account
+Authorization: Bearer Step-Tune-Access-Token
+```
+
+성공 응답은 `{"code":200,"message":"success","data":null}`입니다. 사용자 레코드를 삭제하면
+연결된 Google·Kakao·Naver 계정과 모든 Refresh Token 세션도 DB 외래키 규칙으로 함께 삭제됩니다.
+Android는 성공 직후 저장한 Access/Refresh Token과 사용자 캐시를 모두 지우고 로그인 화면으로 이동해야
+합니다. 기존 Access Token의 서명 만료 시간이 남아 있어도 사용자 조회가 필요한 API에서는 사용할 수 없습니다.
 
 ## 검증
 
