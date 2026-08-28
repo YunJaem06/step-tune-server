@@ -10,8 +10,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
+import org.springframework.test.web.servlet.post
 import tools.jackson.databind.ObjectMapper
 import kotlin.test.assertNotEquals
 
@@ -79,16 +81,16 @@ class AuthControllerIntegrationTests {
             jsonPath("$.data.accessToken") { isNotEmpty() }
             jsonPath("$.data.refreshToken") { isNotEmpty() }
             jsonPath("$.data.accessTokenExpiresIn") { value(900) }
-            jsonPath("$.data.userData.userId") { isNotEmpty() }
+            jsonPath("$.data.userData.userId") { isNumber() }
             jsonPath("$.data.userData.nickName") { isNotEmpty() }
             jsonPath("$.data.userData.profileImageUrl") { doesNotExist() }
         }.andReturn()
         val login = objectMapper.readTree(loginResult.response.contentAsString).get("data")
         val accessToken = login.get("accessToken").stringValue()
-        val userId = login.get("userData").get("userId").stringValue()
+        val userId = login.get("userData").get("userId").longValue()
         val nickName = login.get("userData").get("nickName").stringValue()
 
-        mockMvc.get("/api/v1/me") {
+        mockMvc.get("/api/v1/me/profile") {
             header("Authorization", "Bearer $accessToken")
         }.andExpect {
             status { isOk() }
@@ -117,7 +119,7 @@ class AuthControllerIntegrationTests {
         }.andReturn()
         val loginData = objectMapper.readTree(loginResult.response.contentAsString).get("data")
         val oldRefreshToken = loginData.get("refreshToken").stringValue()
-        val userId = loginData.get("userData").get("userId").stringValue()
+        val userId = loginData.get("userData").get("userId").longValue()
 
         val refreshResult = mockMvc.post("/api/v1/auth/refresh") {
             contentType = MediaType.APPLICATION_JSON
@@ -186,7 +188,7 @@ class AuthControllerIntegrationTests {
     @Test
     fun `me endpoint rejects a request without access token`() {
         // 보호 API는 Authorization 헤더가 없으면 공통 401 JSON을 반환해야 한다.
-        mockMvc.get("/api/v1/me")
+        mockMvc.get("/api/v1/me/profile")
             .andExpect {
                 status { isUnauthorized() }
                 jsonPath("$.code") { value(401) }
@@ -208,6 +210,163 @@ class AuthControllerIntegrationTests {
             status { isUnauthorized() }
             jsonPath("$.code") { value(401) }
             jsonPath("$.data") { doesNotExist() }
+            }
+    }
+
+    /** 닉네임 중복 확인과 변경 API가 앞뒤 공백을 제거한 동일한 값을 사용하는지 검증한다. */
+    @Test
+    fun `nickname availability and update use the normalized nickname`() {
+        val login = loginForProfileTest(
+            provider = SocialProvider.GOOGLE,
+            token = "profile-google-token",
+            subject = "profile-google-subject",
+        )
+
+        mockMvc.get("/api/v1/me/nickname/availability") {
+            header("Authorization", "Bearer ${login.accessToken}")
+            param("nickName", "  새닉네임  ")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.nickName") { value("새닉네임") }
+            jsonPath("$.data.available") { value(true) }
+        }
+
+        mockMvc.patch("/api/v1/me/nickname") {
+            header("Authorization", "Bearer ${login.accessToken}")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"nickName":"  새닉네임  "}"""
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.userId") { isNumber() }
+            jsonPath("$.data.nickName") { value("새닉네임") }
+        }
+
+        mockMvc.get("/api/v1/me/profile") {
+            header("Authorization", "Bearer ${login.accessToken}")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.nickName") { value("새닉네임") }
+        }
+
+        mockMvc.patch("/api/v1/me/nickname") {
+            header("Authorization", "Bearer ${login.accessToken}")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"nickName":"   "}"""
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value(400) }
         }
     }
+
+    /** 다른 사용자의 닉네임은 중복 확인에서 unavailable이고 실제 변경에서도 409가 되는지 검증한다. */
+    @Test
+    fun `duplicate nickname is rejected with conflict`() {
+        val first = loginForProfileTest(
+            provider = SocialProvider.GOOGLE,
+            token = "first-profile-token",
+            subject = "first-profile-subject",
+        )
+        val second = loginForProfileTest(
+            provider = SocialProvider.KAKAO,
+            token = "second-profile-token",
+            subject = "second-profile-subject",
+        )
+
+        mockMvc.patch("/api/v1/me/nickname") {
+            header("Authorization", "Bearer ${first.accessToken}")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"nickName":"함께달려요"}"""
+        }.andExpect {
+            status { isOk() }
+        }
+
+        mockMvc.get("/api/v1/me/nickname/availability") {
+            header("Authorization", "Bearer ${second.accessToken}")
+            param("nickName", "함께달려요")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.available") { value(false) }
+        }
+
+        mockMvc.patch("/api/v1/me/nickname") {
+            header("Authorization", "Bearer ${second.accessToken}")
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"nickName":"함께달려요"}"""
+        }.andExpect {
+            status { isConflict() }
+            jsonPath("$.code") { value(409) }
+            jsonPath("$.message") { value("Nickname is already in use") }
+            jsonPath("$.data") { doesNotExist() }
+        }
+    }
+
+    /** 회원 탈퇴가 사용자, 소셜 연결, Refresh 세션을 삭제하고 이전 토큰 사용을 막는지 검증한다. */
+    @Test
+    fun `delete me removes account links and refresh sessions`() {
+        val login = loginForProfileTest(
+            provider = SocialProvider.NAVER,
+            token = "delete-profile-token",
+            subject = "delete-profile-subject",
+        )
+
+        mockMvc.delete("/api/v1/me/account") {
+            header("Authorization", "Bearer ${login.accessToken}")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.code") { value(200) }
+            jsonPath("$.message") { value("success") }
+            jsonPath("$.data") { doesNotExist() }
+        }
+
+        // app_users 삭제의 ON DELETE CASCADE가 두 인증 자식 테이블에도 적용돼야 한다.
+        kotlin.test.assertEquals(0, userRepository.count())
+        kotlin.test.assertEquals(0, socialAccountRepository.count())
+        kotlin.test.assertEquals(0, authSessionRepository.count())
+
+        mockMvc.post("/api/v1/auth/refresh") {
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(RefreshRequest(login.refreshToken))
+        }.andExpect {
+            status { isUnauthorized() }
+        }
+
+        // JWT 서명 시간이 남아 있어도 DB 사용자가 없으므로 보호된 사용자 API는 404로 종료된다.
+        mockMvc.get("/api/v1/me/profile") {
+            header("Authorization", "Bearer ${login.accessToken}")
+        }.andExpect {
+            status { isNotFound() }
+        }
+    }
+
+    /** 프로필 API 테스트용 사용자를 소셜 로그인시키고 두 Step Tune 토큰을 반환한다. */
+    private fun loginForProfileTest(
+        provider: SocialProvider,
+        token: String,
+        subject: String,
+    ): TestLogin {
+        given(socialTokenVerifierRegistry.verify(provider, token)).willReturn(
+            SocialIdentity(
+                provider = provider,
+                subject = subject,
+                email = "$subject@example.com",
+            ),
+        )
+        val result = mockMvc.post("/api/v1/auth/social") {
+            contentType = MediaType.APPLICATION_JSON
+            content = objectMapper.writeValueAsString(SocialLoginRequest(provider, token))
+        }.andExpect {
+            status { isOk() }
+        }.andReturn()
+        val data = objectMapper.readTree(result.response.contentAsString).get("data")
+        return TestLogin(
+            accessToken = data.get("accessToken").stringValue(),
+            refreshToken = data.get("refreshToken").stringValue(),
+        )
+    }
+
+    /** 테스트가 로그인 응답 전체 대신 이후 요청에 필요한 토큰만 전달하도록 만든 값 객체다. */
+    private data class TestLogin(
+        val accessToken: String,
+        val refreshToken: String,
+    )
 }

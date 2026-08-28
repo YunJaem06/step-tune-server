@@ -2,14 +2,10 @@ package hs.project.steptune.steptuneserver.auth
 
 import hs.project.steptune.steptuneserver.common.ApiResponse
 import jakarta.validation.Valid
-import org.springframework.security.core.annotation.AuthenticationPrincipal
-import org.springframework.security.oauth2.jwt.Jwt
-import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import java.util.UUID
 
 /**
  * Android 앱이 호출하는 인증 HTTP API를 정의한다.
@@ -44,12 +40,4 @@ class AuthController(
         authService.logout(request)
         return ApiResponse.successWithoutData()
     }
-
-    /**
-     * Access Token으로 인증된 현재 사용자의 최신 정보를 반환한다.
-     * userId를 요청에서 받지 않고 검증된 JWT의 subject에서 꺼내므로 다른 사용자를 사칭할 수 없다.
-     */
-    @GetMapping("/me")
-    fun me(@AuthenticationPrincipal jwt: Jwt): ApiResponse<UserData> =
-        ApiResponse.success(authService.getUser(UUID.fromString(jwt.subject)))
 }

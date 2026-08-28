@@ -1,6 +1,7 @@
 package hs.project.steptune.steptuneserver.auth
 
 import hs.project.steptune.steptuneserver.config.AuthProperties
+import hs.project.steptune.steptuneserver.user.UserData
 import hs.project.steptune.steptuneserver.user.UserEntity
 import hs.project.steptune.steptuneserver.user.UserRepository
 import org.springframework.stereotype.Service
@@ -9,7 +10,6 @@ import java.security.SecureRandom
 import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
-import java.util.UUID
 
 /**
  * 소셜 로그인부터 Step Tune 토큰 발급까지 인증 업무 흐름을 담당한다.
@@ -105,7 +105,7 @@ class AuthService(
 
         // 최초 로그인 제공자를 유지하여 새 JWT에도 동일한 auth_provider를 기록한다.
         val account = socialAccountRepository.findByUserIdAndProvider(
-            session.user.id,
+            session.user.requireId(),
             session.provider,
         ) ?: throw UserNotFoundException()
 
@@ -126,14 +126,6 @@ class AuthService(
             // 실제 행을 삭제하지 않고 폐기 시각을 남겨 감사와 재사용 차단 상태를 표현한다.
             session.revokedAt = Instant.now(clock)
         }
-    }
-
-    /** JWT subject에서 얻은 내부 userId로 최신 닉네임을 조회한다. */
-    @Transactional(readOnly = true)
-    fun getUser(userId: UUID): UserData {
-        // readOnly 트랜잭션은 변경 감지 비용을 줄이고 이 함수가 조회 전용임을 명시한다.
-        val user = userRepository.findById(userId).orElseThrow { UserNotFoundException() }
-        return user.toData()
     }
 
     /** 검증된 소셜 신원을 Step Tune 신규 사용자 및 소셜 계정으로 한 트랜잭션 안에서 저장한다. */
@@ -167,7 +159,7 @@ class AuthService(
         val user = account.user
 
         // Access Token은 서버 서명이 포함된 JWT이므로 DB 조회 없이도 일반 API 인증에 사용할 수 있다.
-        val accessToken = tokenService.createAccessToken(user.id, account.provider)
+        val accessToken = tokenService.createAccessToken(user.requireId(), account.provider)
 
         // Refresh Token은 임의 문자열이고, 원문은 앱에만 전달한다.
         val refreshToken = tokenService.createRefreshToken()
@@ -210,7 +202,11 @@ class AuthService(
 
     /** JPA UserEntity를 외부 API에 노출해도 되는 최소 UserData로 변환한다. */
     private fun UserEntity.toData() = UserData(
-        userId = id,
+        userId = requireId(),
         nickName = nickname,
     )
+
+    /** DB에 저장된 엔티티에 숫자 ID가 없으면 조용히 잘못된 토큰을 만들지 않고 즉시 실패시킨다. */
+    private fun UserEntity.requireId(): Long =
+        requireNotNull(id) { "Persisted user must have an id" }
 }

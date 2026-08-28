@@ -4,6 +4,8 @@ import hs.project.steptune.steptuneserver.auth.InvalidAuthTokenException
 import hs.project.steptune.steptuneserver.auth.SocialProviderNotConfiguredException
 import hs.project.steptune.steptuneserver.auth.SocialVerificationUnavailableException
 import hs.project.steptune.steptuneserver.auth.UserNotFoundException
+import hs.project.steptune.steptuneserver.user.InvalidNicknameException
+import hs.project.steptune.steptuneserver.user.NicknameAlreadyExistsException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
@@ -36,6 +38,16 @@ class ApiExceptionHandler {
     @ExceptionHandler(UserNotFoundException::class)
     fun handleUserNotFound(): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.NOT_FOUND, "User not found")
+
+    /** 공백 또는 30자 초과 닉네임은 앱이 입력값을 고쳐 다시 보낼 수 있도록 400으로 응답한다. */
+    @ExceptionHandler(InvalidNicknameException::class)
+    fun handleInvalidNickname(exception: InvalidNicknameException): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_REQUEST, exception.message ?: "Nickname is invalid")
+
+    /** 다른 사용자가 이미 쓰는 닉네임은 현재 상태와 충돌하므로 409 Conflict로 응답한다. */
+    @ExceptionHandler(NicknameAlreadyExistsException::class)
+    fun handleNicknameAlreadyExists(exception: NicknameAlreadyExistsException): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.CONFLICT, exception.message ?: "Nickname is already in use")
 
     /** @Valid와 Bean Validation에서 잡힌 빈 필드 등은 첫 번째 오류를 400으로 반환한다. */
     @ExceptionHandler(MethodArgumentNotValidException::class)

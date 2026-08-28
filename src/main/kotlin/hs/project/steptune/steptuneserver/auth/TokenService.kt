@@ -13,7 +13,6 @@ import java.security.SecureRandom
 import java.time.Clock
 import java.time.Instant
 import java.util.Base64
-import java.util.UUID
 
 /** 생성된 Access Token 원문과 정확한 만료 시각을 함께 전달하는 내부 값 객체다. */
 data class AccessToken(
@@ -52,7 +51,7 @@ class TokenService(
      * 일반 API 인증에 사용할 HS256 서명 JWT를 생성한다.
      * subject에는 내부 userId를 넣고 issuer, audience, token_use도 함께 넣어 용도 혼동을 막는다.
      */
-    fun createAccessToken(userId: UUID, provider: SocialProvider): AccessToken {
+    fun createAccessToken(userId: Long, provider: SocialProvider): AccessToken {
         val issuedAt = Instant.now(clock)
         val expiresAt = issuedAt.plus(properties.accessTokenTtl)
 

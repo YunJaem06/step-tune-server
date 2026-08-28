@@ -1,7 +1,7 @@
 package hs.project.steptune.steptuneserver.auth
 
+import hs.project.steptune.steptuneserver.user.UserData
 import jakarta.validation.constraints.NotBlank
-import java.util.UUID
 
 /** 기존 Google 전용 로그인 요청. idToken은 Google이 서명한 사용자 인증 결과다. */
 data class GoogleLoginRequest(
@@ -31,14 +31,6 @@ data class LogoutRequest(
     /** 서버가 어떤 로그인 세션을 폐기할지 찾는 데 사용하는 현재 Refresh Token이다. */
     @field:NotBlank
     val refreshToken: String,
-)
-
-/** 앱 화면과 로컬 캐시에 필요한 최소 사용자 정보다. */
-data class UserData(
-    /** 서버가 발급한 Step Tune 내부 사용자 식별자다. */
-    val userId: UUID,
-    /** 신규 사용자는 랜덤으로 받고, 추후 프로필 기능에서 변경할 값이다. */
-    val nickName: String,
 )
 
 /** 로그인과 자동 로그인 성공 시 data 안에 들어가는 인증 결과다. */

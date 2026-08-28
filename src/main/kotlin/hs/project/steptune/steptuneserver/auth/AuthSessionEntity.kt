@@ -6,12 +6,13 @@ import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.FetchType
+import jakarta.persistence.GeneratedValue
+import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import java.time.Instant
-import java.util.UUID
 
 /**
  * 한 번 발급한 Refresh Token의 서버 측 세션 상태를 나타낸다.
@@ -22,10 +23,11 @@ import java.util.UUID
 @Entity
 @Table(name = "auth_sessions")
 class AuthSessionEntity(
-    /** 세션 레코드 자체의 내부 식별자다. */
+    /** MySQL이 1부터 순서대로 생성하는 세션 레코드의 내부 식별자다. */
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(nullable = false, updatable = false)
-    var id: UUID = UUID.randomUUID(),
+    var id: Long? = null,
 
     /** 이 Refresh Token을 발급받은 Step Tune 사용자다. */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

@@ -1,6 +1,6 @@
 # 인증 DB 마이그레이션 설명
 
-현재 `V1`~`V4`는 첫 MySQL 실행 전에 MySQL 8.4 문법으로 확정한 초기 이력입니다.
+현재 `V1`~`V5`는 MySQL 8.4에 적용되는 인증 스키마 변경 이력입니다.
 Flyway는 적용한 SQL 파일의 체크섬을 DB에 저장하므로, MySQL에 한 번 적용한 뒤에는 주석을
 포함해 기존 파일을 수정하지 않습니다. 이후 구조 변경은 항상 다음 번호의 SQL 파일로 추가합니다.
 
@@ -29,3 +29,10 @@ Flyway는 적용한 SQL 파일의 체크섬을 DB에 저장하므로, MySQL에 �
 - 기존 사용자는 UUID 일부를 이용한 중복 가능성이 낮은 초기 닉네임으로 이관합니다.
 - 사용하지 않는 `profile_image_url`을 제거합니다.
 - 모든 사용자에게 닉네임을 요구하고 중복을 막도록 `NOT NULL`과 `UNIQUE` 제약을 추가합니다.
+
+## V5__use_auto_increment_ids.sql
+
+- `app_users`, `social_accounts`, `auth_sessions`의 ID를 `BIGINT AUTO_INCREMENT`로 변경합니다.
+- 기존 UUID 사용자는 생성 시각 순서대로 `1, 2, 3...` 숫자 ID를 배정받습니다.
+- 기존 소셜 계정과 Refresh Token 세션은 임시 UUID→숫자 매핑을 이용해 새 사용자 ID로 연결합니다.
+- 데이터 복사가 끝난 뒤 UUID 테이블과 임시 매핑을 제거하고 숫자형 테이블을 기존 이름으로 교체합니다.

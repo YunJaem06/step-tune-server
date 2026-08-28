@@ -69,6 +69,7 @@ class AuthServiceIntegrationTests {
         assertEquals(listOf("step-tune-android"), jwt.audience)
         assertEquals("access", jwt.getClaimAsString("token_use"))
         assertEquals("GOOGLE", jwt.getClaimAsString("auth_provider"))
+        assert(response.userData.userId > 0)
         assert(response.userData.nickName.matches(Regex("스텝러너\\d{8}")))
         assertEquals(1, userRepository.count())
         assertEquals(1, socialAccountRepository.count())
@@ -110,6 +111,8 @@ class AuthServiceIntegrationTests {
         )
 
         assertNotEquals(google.userData.userId, kakao.userData.userId)
+        // 같은 테스트에서 연속 생성한 두 사용자는 DB의 다음 숫자 ID를 차례대로 받아야 한다.
+        assertEquals(google.userData.userId + 1, kakao.userData.userId)
         assertEquals(2, userRepository.count())
         assertEquals(2, socialAccountRepository.count())
     }
