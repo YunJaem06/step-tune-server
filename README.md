@@ -234,7 +234,81 @@ Authorization: Bearer Step-Tune-Access-Token
 성공 응답은 `{"code":200,"message":"success","data":null}`입니다. 사용자 레코드를 삭제하면
 연결된 Google·Kakao·Naver 계정과 모든 Refresh Token 세션도 DB 외래키 규칙으로 함께 삭제됩니다.
 Android는 성공 직후 저장한 Access/Refresh Token과 사용자 캐시를 모두 지우고 로그인 화면으로 이동해야
-합니다. 기존 Access Token의 서명 만료 시간이 남아 있어도 사용자 조회가 필요한 API에서는 사용할 수 없습니다.
+합니다. `daily_step_records`도 DB 외래키 규칙으로 함께 삭제됩니다. 기존 Access Token의 서명 만료 시간이
+남아 있어도 사용자 조회가 필요한 API에서는 사용할 수 없습니다.
+
+### 일별 걸음 동기화
+
+Android가 보관한 하루 총걸음을 서버에 신규 저장하거나 같은 날짜의 최신 값으로 갱신합니다. `userId`는
+요청에 넣지 않습니다. 서버가 Bearer Access Token에서 현재 사용자를 확인하므로 다른 사용자의 기록을
+저장할 수 없습니다. 여러 날의 로컬 기록을 한 번에 올릴 수 있으며 요청 한 번의 최대 범위는 366건입니다.
+
+```http
+PUT /api/v1/steps/daily-records/sync
+Authorization: Bearer Step-Tune-Access-Token
+Content-Type: application/json
+
+{
+  "records": [
+    {
+      "recordDate": "2026-09-01",
+      "stepCount": 8432,
+      "measuredAt": "2026-09-01T23:55:00+09:00"
+    },
+    {
+      "recordDate": "2026-09-02",
+      "stepCount": 2190,
+      "measuredAt": "2026-09-02T15:30:00+09:00"
+    }
+  ]
+}
+```
+
+`recordDate`는 사용자의 현지 날짜, `stepCount`는 그 날짜의 누적 총걸음, `measuredAt`은 앱이 마지막으로
+측정한 시각입니다. `measuredAt`에는 `Z` 또는 `+09:00` 같은 시간대 오프셋을 반드시 포함합니다. 같은
+사용자와 날짜를 다시 전송하면 걸음 수를 더하지 않고 기존 총합을 교체하므로 네트워크 재시도에도 중복
+행이 생기지 않습니다.
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "records": [
+      {
+        "recordDate": "2026-09-01",
+        "stepCount": 8432,
+        "measuredAt": "2026-09-01T14:55:00Z",
+        "updatedAt": "2026-09-02T06:30:00Z"
+      }
+    ],
+    "syncTime": "2026-09-02T06:30:00Z"
+  }
+}
+```
+
+한 요청 안에 같은 날짜가 두 번 있거나 걸음 수가 음수이면 `400 Bad Request`입니다.
+
+### 특정 날짜 걸음 조회
+
+```http
+GET /api/v1/steps/daily-records/by-date?recordDate=2026-09-02
+Authorization: Bearer Step-Tune-Access-Token
+```
+
+저장된 날짜이면 `data.record`에 일별 기록이 들어갑니다. 아직 저장하지 않은 날짜는 정상 응답
+`{"code":200,"message":"success","data":{"record":null}}`로 반환되어, 실제 0걸음을 저장한 기록과
+구분할 수 있습니다.
+
+### 걸음 이력 조회
+
+```http
+GET /api/v1/steps/daily-records/history?from=2026-09-01&to=2026-09-30
+Authorization: Bearer Step-Tune-Access-Token
+```
+
+`from`, `to` 날짜를 모두 포함하며 기록이 있는 날짜만 오름차순으로 반환합니다. 한 번에 최대 366일을
+조회할 수 있습니다. 더 긴 이력이 필요하면 Android가 구간을 나눠 호출합니다.
 
 ## 검증
 
