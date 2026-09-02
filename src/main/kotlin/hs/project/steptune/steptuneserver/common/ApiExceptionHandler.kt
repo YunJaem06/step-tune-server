@@ -4,6 +4,10 @@ import hs.project.steptune.steptuneserver.auth.InvalidAuthTokenException
 import hs.project.steptune.steptuneserver.auth.SocialProviderNotConfiguredException
 import hs.project.steptune.steptuneserver.auth.SocialVerificationUnavailableException
 import hs.project.steptune.steptuneserver.auth.UserNotFoundException
+import hs.project.steptune.steptuneserver.step.DuplicateStepRecordDateException
+import hs.project.steptune.steptuneserver.step.InvalidStepCountException
+import hs.project.steptune.steptuneserver.step.InvalidStepRecordDateException
+import hs.project.steptune.steptuneserver.step.InvalidStepRecordRangeException
 import hs.project.steptune.steptuneserver.user.InvalidNicknameException
 import hs.project.steptune.steptuneserver.user.NicknameAlreadyExistsException
 import org.springframework.http.HttpStatus
@@ -48,6 +52,32 @@ class ApiExceptionHandler {
     @ExceptionHandler(NicknameAlreadyExistsException::class)
     fun handleNicknameAlreadyExists(exception: NicknameAlreadyExistsException): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.CONFLICT, exception.message ?: "Nickname is already in use")
+
+    /** 한 요청의 날짜 중복은 어느 걸음 수가 최종값인지 모호하므로 400으로 응답한다. */
+    @ExceptionHandler(DuplicateStepRecordDateException::class)
+    fun handleDuplicateStepRecordDate(
+        exception: DuplicateStepRecordDateException,
+    ): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_REQUEST, exception.message ?: "Step record date is duplicated")
+
+    /** 음수 걸음 수는 앱이 올바른 총합으로 고쳐 보낼 수 있도록 400으로 응답한다. */
+    @ExceptionHandler(InvalidStepCountException::class)
+    fun handleInvalidStepCount(exception: InvalidStepCountException): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_REQUEST, exception.message ?: "Step count is invalid")
+
+    /** 날짜 쿼리 값이 `YYYY-MM-DD` 형식의 실제 날짜가 아니면 400으로 응답한다. */
+    @ExceptionHandler(InvalidStepRecordDateException::class)
+    fun handleInvalidStepRecordDate(
+        exception: InvalidStepRecordDateException,
+    ): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_REQUEST, exception.message ?: "Step record date is invalid")
+
+    /** 시작일/종료일 순서나 최대 기간이 잘못된 조회 요청은 400으로 응답한다. */
+    @ExceptionHandler(InvalidStepRecordRangeException::class)
+    fun handleInvalidStepRecordRange(
+        exception: InvalidStepRecordRangeException,
+    ): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_REQUEST, exception.message ?: "Step record range is invalid")
 
     /** @Valid와 Bean Validation에서 잡힌 빈 필드 등은 첫 번째 오류를 400으로 반환한다. */
     @ExceptionHandler(MethodArgumentNotValidException::class)

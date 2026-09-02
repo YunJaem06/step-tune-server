@@ -1,6 +1,6 @@
 package hs.project.steptune.steptuneserver.user
 
-import hs.project.steptune.steptuneserver.auth.InvalidAuthTokenException
+import hs.project.steptune.steptuneserver.auth.requireUserId
 import hs.project.steptune.steptuneserver.common.ApiResponse
 import jakarta.validation.Valid
 import org.springframework.security.core.annotation.AuthenticationPrincipal
@@ -23,7 +23,7 @@ class UserController(
     /** Access Token으로 인증된 현재 사용자의 최신 정보를 반환한다. */
     @GetMapping("/profile")
     fun me(@AuthenticationPrincipal jwt: Jwt): ApiResponse<UserData> =
-        ApiResponse.success(userService.getUser(jwt.userId()))
+        ApiResponse.success(userService.getUser(jwt.requireUserId()))
 
     /** 현재 사용자의 닉네임을 변경하고 변경된 사용자 정보를 반환한다. */
     @PatchMapping("/nickname")
@@ -31,7 +31,7 @@ class UserController(
         @AuthenticationPrincipal jwt: Jwt,
         @Valid @RequestBody request: UpdateNicknameRequest,
     ): ApiResponse<UserData> =
-        ApiResponse.success(userService.updateNickname(jwt.userId(), request))
+        ApiResponse.success(userService.updateNickname(jwt.requireUserId(), request))
 
     /** 프로필 저장 전에 입력한 닉네임을 사용할 수 있는지 확인한다. */
     @GetMapping("/nickname/availability")
@@ -40,20 +40,12 @@ class UserController(
         // 파라미터가 빠져도 Spring 기본 오류 대신 Service의 공통 400 JSON으로 응답하게 빈 값을 사용한다.
         @RequestParam(defaultValue = "") nickName: String,
     ): ApiResponse<NicknameAvailabilityData> =
-        ApiResponse.success(userService.checkNicknameAvailability(jwt.userId(), nickName))
+        ApiResponse.success(userService.checkNicknameAvailability(jwt.requireUserId(), nickName))
 
     /** 현재 사용자와 소셜 연결, 모든 Refresh Token 세션을 영구 삭제한다. */
     @DeleteMapping("/account")
     fun deleteMe(@AuthenticationPrincipal jwt: Jwt): ApiResponse<Any> {
-        userService.deleteUser(jwt.userId())
+        userService.deleteUser(jwt.requireUserId())
         return ApiResponse.successWithoutData()
     }
-
-    /**
-     * 검증된 JWT subject를 숫자형 내부 userId로 변환한다.
-     * subject가 없거나 숫자가 아니면 DB를 조회하지 않고 401 인증 실패로 처리한다.
-     */
-    private fun Jwt.userId(): Long =
-        subject?.toLongOrNull()
-            ?: throw InvalidAuthTokenException("Access token subject is invalid")
 }
