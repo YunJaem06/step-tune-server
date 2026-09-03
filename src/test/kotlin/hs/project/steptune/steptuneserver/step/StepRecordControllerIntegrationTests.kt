@@ -339,6 +339,43 @@ class StepRecordControllerIntegrationTests {
         }
     }
 
+    /** 실제 추천 엔진 연결 전에도 기준일 걸음 누락과 기능 준비 상태를 서로 다른 오류로 반환하는지 검증한다. */
+    @Test
+    fun `recommendation contract checks step record before unavailable engine`() {
+        val accessToken = login("pending-recommendation-token", "pending-recommendation-subject")
+        val requestBody =
+            """
+            {
+              "recordDate": "2026-09-03",
+              "preferredMoods": ["ENERGETIC", "LIVELY"],
+              "preferredGenres": ["HIP_HOP", "RNB"],
+              "durationMinutes": 30
+            }
+            """.trimIndent()
+
+        // 기준일 걸음이 없으면 Android가 먼저 걸음을 동기화할 수 있도록 404를 반환한다.
+        mockMvc.post("/api/v1/music-recommendations/generate") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content = requestBody
+        }.andExpect {
+            status { isNotFound() }
+            jsonPath("$.message") { value("Step record not found: 2026-09-03") }
+        }
+
+        saveOneDay(accessToken, 5000, "2026-09-03")
+
+        // 걸음은 준비됐지만 아직 AI 추천 Service가 없으므로 가짜 성공 데이터 대신 503을 반환한다.
+        mockMvc.post("/api/v1/music-recommendations/generate") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content = requestBody
+        }.andExpect {
+            status { isServiceUnavailable() }
+            jsonPath("$.message") { value("Music recommendation engine is not configured") }
+        }
+    }
+
     /** 최근 7일 평균이 0일 때 증감률을 계산하지 않고 null로 안전하게 반환하는지 검증한다. */
     @Test
     fun `weekly statistics return null change rate when average is zero`() {

@@ -4,6 +4,7 @@ import hs.project.steptune.steptuneserver.auth.InvalidAuthTokenException
 import hs.project.steptune.steptuneserver.auth.SocialProviderNotConfiguredException
 import hs.project.steptune.steptuneserver.auth.SocialVerificationUnavailableException
 import hs.project.steptune.steptuneserver.auth.UserNotFoundException
+import hs.project.steptune.steptuneserver.recommendation.MusicRecommendationUnavailableException
 import hs.project.steptune.steptuneserver.step.DuplicateStepRecordDateException
 import hs.project.steptune.steptuneserver.step.InvalidStepCountException
 import hs.project.steptune.steptuneserver.step.InvalidStepRecordDateException
@@ -86,6 +87,13 @@ class ApiExceptionHandler {
         exception: StepRecordNotFoundException,
     ): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.NOT_FOUND, exception.message ?: "Step record not found")
+
+    /** 실제 AI 추천 Service가 연결되기 전 추천 요청은 성공으로 위장하지 않고 503으로 응답한다. */
+    @ExceptionHandler(MusicRecommendationUnavailableException::class)
+    fun handleMusicRecommendationUnavailable(
+        exception: MusicRecommendationUnavailableException,
+    ): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.SERVICE_UNAVAILABLE, exception.message ?: "Music recommendation is unavailable")
 
     /** @Valid와 Bean Validation에서 잡힌 빈 필드 등은 첫 번째 오류를 400으로 반환한다. */
     @ExceptionHandler(MethodArgumentNotValidException::class)
