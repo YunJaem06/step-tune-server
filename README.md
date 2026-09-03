@@ -266,8 +266,8 @@ Content-Type: application/json
 
 `recordDate`는 사용자의 현지 날짜, `stepCount`는 그 날짜의 누적 총걸음, `measuredAt`은 앱이 마지막으로
 측정한 시각입니다. `measuredAt`에는 `Z` 또는 `+09:00` 같은 시간대 오프셋을 반드시 포함합니다. 같은
-사용자와 날짜를 다시 전송하면 걸음 수를 더하지 않고 기존 총합을 교체하므로 네트워크 재시도에도 중복
-행이 생기지 않습니다.
+사용자와 날짜를 다시 전송하면 걸음 수를 더하지 않고 기존 값과 요청값 중 큰 총합을 유지합니다. 따라서
+네트워크 재시도에 중복 행이 생기지 않고 늦게 도착한 오래된 요청도 서버 걸음 수를 감소시키지 않습니다.
 
 ```json
 {
@@ -309,6 +309,102 @@ Authorization: Bearer Step-Tune-Access-Token
 
 `from`, `to` 날짜를 모두 포함하며 기록이 있는 날짜만 오름차순으로 반환합니다. 한 번에 최대 366일을
 조회할 수 있습니다. 더 긴 이력이 필요하면 Android가 구간을 나눠 호출합니다.
+
+### 최근 7일 걸음 통계
+
+AI 음악 추천과 Android 통계 화면에서 사용할 로그인 사용자의 기준일 포함 최근 7일 통계를 반환합니다.
+서버에 실제 기록이 있는 날짜만 평균에 포함하므로 아직 동기화되지 않은 날짜를 0걸음으로 잘못 계산하지
+않습니다.
+
+```http
+GET /api/v1/steps/statistics/weekly?recordDate=2026-09-03
+Authorization: Bearer Step-Tune-Access-Token
+```
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "recordDate": "2026-09-03",
+    "todayStepCount": 5000,
+    "recent7DayAverage": 3000.00,
+    "recordedDayCount": 3,
+    "differenceFromAverage": 2000.00,
+    "changeRatePercent": 66.67
+  }
+}
+```
+
+`recent7DayAverage`는 기준일과 이전 6일 중 기록이 있는 날짜의 평균이고 `recordedDayCount`는 그 계산에
+사용한 날짜 수입니다. `differenceFromAverage`는 기준일 걸음에서 평균을 뺀 값이며 음수일 수도 있습니다.
+평균이 0이면 0으로 나눌 수 없으므로 `changeRatePercent`는 `null`입니다. 기준일 기록이 아직 없으면
+Android가 걸음을 먼저 동기화할 수 있도록 `404 Not Found`를 반환합니다.
+
+### AI 음악 추천 생성 계약
+
+Android는 걸음 동기화가 끝난 뒤 원하는 분위기, 장르, 재생 시간을 선택해 음악 추천을 요청합니다.
+`userId`와 `stepCount`는 요청에 넣지 않고 서버가 Access Token과 저장된 걸음 기록에서 확인합니다.
+
+```http
+POST /api/v1/music-recommendations/generate
+Authorization: Bearer Step-Tune-Access-Token
+Content-Type: application/json
+
+{
+  "recordDate": "2026-09-03",
+  "preferredMoods": ["ENERGETIC", "LIVELY"],
+  "preferredGenres": ["HIP_HOP", "RNB"],
+  "durationMinutes": 30
+}
+```
+
+`preferredMoods`는 Android와 같은 `CALM`, `ENERGETIC`, `EMOTIONAL`, `FOCUSED`, `LIVELY` 중
+최대 2개입니다. `preferredGenres`는 `BALLAD`, `HIP_HOP`, `RNB`, `POP`, `ROCK`, `INDIE`,
+`JAZZ`, `CLASSICAL` 중 최대 3개이고, 재생 시간은 10~120분입니다. 두 목록은 생략할 수
+있으며 enum 값은 기존 서버 설정에 따라 대소문자를 구분하지 않습니다.
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "recommendationId": "a03f850b-84df-4c80-bf0e-f37489f69665",
+    "recordDate": "2026-09-03",
+    "stepSummary": {
+      "todayStepCount": 5000,
+      "recent7DayAverage": 3000.00,
+      "recordedDayCount": 3,
+      "differenceFromAverage": 2000.00,
+      "changeRatePercent": 66.67
+    },
+    "activityLevel": "HIGH",
+    "musicMoods": ["ENERGETIC", "LIVELY"],
+    "genres": ["HIP_HOP", "POP"],
+    "durationMinutes": 30,
+    "reason": "오늘은 평소보다 활동량이 많아 활기찬 곡을 추천했어요.",
+    "searchQueries": [
+      {
+        "provider": "YOUTUBE",
+        "query": "energetic hip hop running playlist"
+      },
+      {
+        "provider": "SPOTIFY",
+        "query": "upbeat pop workout playlist"
+      }
+    ],
+    "generatedAt": "2026-09-03T06:30:00Z"
+  }
+}
+```
+
+`recommendationId`는 서버 DB의 숫자 PK가 아니라 요청마다 발급하는 UUID 문자열입니다. 서버는 추천 결과를
+저장하지 않으며 Android가 응답을 Room에 보관합니다. `activityLevel`은 `LOW`, `MODERATE`, `HIGH` 중 하나이고,
+`searchQueries`는 실제 곡 목록 대신 Android가 YouTube·Spotify 검색 화면을 여는 데 사용하는 검색어입니다.
+
+기준 날짜의 걸음 기록이 없으면 `404 Not Found`입니다. 현재 단계에서는 성공 응답 계약과 검증만 확정했고
+실제 AI 추천 Service가 아직 연결되지 않았으므로, 걸음 기록이 있는 유효한 실행 요청은
+`503 Service Unavailable`을 반환합니다. 다음 단계에서 AI Service를 구현하면 성공 응답으로 교체됩니다.
 
 ## 검증
 
