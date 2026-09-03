@@ -8,6 +8,7 @@ import hs.project.steptune.steptuneserver.step.DuplicateStepRecordDateException
 import hs.project.steptune.steptuneserver.step.InvalidStepCountException
 import hs.project.steptune.steptuneserver.step.InvalidStepRecordDateException
 import hs.project.steptune.steptuneserver.step.InvalidStepRecordRangeException
+import hs.project.steptune.steptuneserver.step.StepRecordNotFoundException
 import hs.project.steptune.steptuneserver.user.InvalidNicknameException
 import hs.project.steptune.steptuneserver.user.NicknameAlreadyExistsException
 import org.springframework.http.HttpStatus
@@ -78,6 +79,13 @@ class ApiExceptionHandler {
         exception: InvalidStepRecordRangeException,
     ): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.BAD_REQUEST, exception.message ?: "Step record range is invalid")
+
+    /** 통계 기준 날짜의 기록이 없으면 Android가 동기화 후 다시 요청할 수 있도록 404로 응답한다. */
+    @ExceptionHandler(StepRecordNotFoundException::class)
+    fun handleStepRecordNotFound(
+        exception: StepRecordNotFoundException,
+    ): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.NOT_FOUND, exception.message ?: "Step record not found")
 
     /** @Valid와 Bean Validation에서 잡힌 빈 필드 등은 첫 번째 오류를 400으로 반환한다. */
     @ExceptionHandler(MethodArgumentNotValidException::class)

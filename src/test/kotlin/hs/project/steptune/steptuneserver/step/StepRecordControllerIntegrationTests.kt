@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
 import tools.jackson.databind.ObjectMapper
+import java.time.LocalDate
 import kotlin.test.assertEquals
 
 /** 걸음 API의 JWT 사용자 분리, upsert, 조회, 탈퇴 연동을 실제 HTTP와 H2 DB로 검증한다. */
@@ -69,7 +70,7 @@ class StepRecordControllerIntegrationTests {
         userRepository.deleteAll()
     }
 
-    /** 여러 날짜를 저장하고 같은 날짜를 다시 보내도 행 추가 없이 최신 총합으로 갱신되는지 검증한다. */
+    /** 여러 날짜를 저장하고 같은 날짜의 더 큰 총합을 다시 보내면 행 추가 없이 갱신되는지 검증한다. */
     @Test
     fun `daily step sync creates and updates one row per user and date`() {
         val accessToken = login("step-sync-token", "step-sync-subject")
@@ -147,6 +148,57 @@ class StepRecordControllerIntegrationTests {
             jsonPath("$.data.records.length()") { value(2) }
             jsonPath("$.data.records[1].stepCount") { value(3100) }
         }
+    }
+
+    /** 늦게 도착한 낮은 총합이 더 최신인 서버 기록과 측정·수정 시각을 되돌리지 않는지 검증한다. */
+    @Test
+    fun `daily step sync ignores a stale lower total`() {
+        val accessToken = login("stale-step-token", "stale-step-subject")
+        val recordDate = LocalDate.parse("2026-09-02")
+
+        // 먼저 포그라운드 서비스가 계산한 더 큰 총합을 저장한 상황을 만든다.
+        saveOneDay(accessToken, 1001, recordDate.toString())
+        val recordBeforeStaleRequest = requireNotNull(
+            dailyStepRecordRepository.findByUserIdAndRecordDate(
+                userId = requireNotNull(userRepository.findAll().single().id),
+                recordDate = recordDate,
+            ),
+        )
+        val measuredAtBeforeStaleRequest = recordBeforeStaleRequest.measuredAt
+        val updatedAtBeforeStaleRequest = recordBeforeStaleRequest.updatedAt
+
+        // 이전 1,000걸음 요청이 더 늦은 측정 시각을 달고 도착해도 값과 시각을 모두 유지해야 한다.
+        mockMvc.put("/api/v1/steps/daily-records/sync") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content =
+                """
+                {
+                  "records": [
+                    {
+                      "recordDate": "2026-09-02",
+                      "stepCount": 1000,
+                      "measuredAt": "2026-09-02T16:00:00+09:00"
+                    }
+                  ]
+                }
+                """.trimIndent()
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.records[0].stepCount") { value(1001) }
+            jsonPath("$.data.records[0].measuredAt") { value(measuredAtBeforeStaleRequest.toString()) }
+            jsonPath("$.data.records[0].updatedAt") { value(updatedAtBeforeStaleRequest.toString()) }
+        }
+
+        val recordAfterStaleRequest = requireNotNull(
+            dailyStepRecordRepository.findByUserIdAndRecordDate(
+                userId = requireNotNull(userRepository.findAll().single().id),
+                recordDate = recordDate,
+            ),
+        )
+        assertEquals(1001, recordAfterStaleRequest.stepCount)
+        assertEquals(measuredAtBeforeStaleRequest, recordAfterStaleRequest.measuredAt)
+        assertEquals(updatedAtBeforeStaleRequest, recordAfterStaleRequest.updatedAt)
     }
 
     /** 요청 내부 날짜 중복과 음수 걸음 수가 DB 저장 전에 400으로 거절되는지 검증한다. */
@@ -228,6 +280,83 @@ class StepRecordControllerIntegrationTests {
         }
     }
 
+    /** 기준일 포함 최근 7일의 실제 기록만 평균에 포함하고 다른 사용자의 기록은 제외하는지 검증한다. */
+    @Test
+    fun `weekly statistics calculate authenticated user records only`() {
+        val firstAccessToken = login("first-statistics-token", "first-statistics-subject")
+        val secondAccessToken = login("second-statistics-token", "second-statistics-subject")
+
+        // 9월 3일 기준 최근 7일은 8월 28일부터이며, 기록이 없는 날짜는 평균에서 제외한다.
+        saveOneDay(firstAccessToken, 1000, "2026-08-28")
+        saveOneDay(firstAccessToken, 3000, "2026-09-01")
+        saveOneDay(firstAccessToken, 5000, "2026-09-03")
+        // 같은 날짜의 다른 사용자 기록은 첫 사용자의 평균에 섞이면 안 된다.
+        saveOneDay(secondAccessToken, 9000, "2026-09-03")
+
+        mockMvc.get("/api/v1/steps/statistics/weekly") {
+            header("Authorization", "Bearer $firstAccessToken")
+            param("recordDate", "2026-09-03")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.code") { value(200) }
+            jsonPath("$.data.recordDate") { value("2026-09-03") }
+            jsonPath("$.data.todayStepCount") { value(5000) }
+            jsonPath("$.data.recent7DayAverage") { value(3000.0) }
+            jsonPath("$.data.recordedDayCount") { value(3) }
+            jsonPath("$.data.differenceFromAverage") { value(2000.0) }
+            jsonPath("$.data.changeRatePercent") { value(66.67) }
+        }
+    }
+
+    /** 잘못된 기준 날짜는 400, 아직 동기화되지 않은 정상 날짜는 404로 구분하는지 검증한다. */
+    @Test
+    fun `weekly statistics distinguish invalid and missing record dates`() {
+        val accessToken = login("missing-statistics-token", "missing-statistics-subject")
+
+        mockMvc.get("/api/v1/steps/statistics/weekly") {
+            header("Authorization", "Bearer $accessToken")
+            param("recordDate", "not-a-date")
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value(400) }
+            jsonPath("$.message") { value("recordDate must be a valid YYYY-MM-DD date") }
+        }
+
+        mockMvc.get("/api/v1/steps/statistics/weekly") {
+            header("Authorization", "Bearer $accessToken")
+            param("recordDate", "2026-09-03")
+        }.andExpect {
+            status { isNotFound() }
+            jsonPath("$.code") { value(404) }
+            jsonPath("$.message") { value("Step record not found: 2026-09-03") }
+        }
+
+        // 보호 API이므로 Access Token이 없는 요청은 Controller에 도달하기 전에 거절되어야 한다.
+        mockMvc.get("/api/v1/steps/statistics/weekly") {
+            param("recordDate", "2026-09-03")
+        }.andExpect {
+            status { isUnauthorized() }
+        }
+    }
+
+    /** 최근 7일 평균이 0일 때 증감률을 계산하지 않고 null로 안전하게 반환하는지 검증한다. */
+    @Test
+    fun `weekly statistics return null change rate when average is zero`() {
+        val accessToken = login("zero-statistics-token", "zero-statistics-subject")
+        saveOneDay(accessToken, 0, "2026-09-03")
+
+        mockMvc.get("/api/v1/steps/statistics/weekly") {
+            header("Authorization", "Bearer $accessToken")
+            param("recordDate", "2026-09-03")
+        }.andExpect {
+            status { isOk() }
+            jsonPath("$.data.todayStepCount") { value(0) }
+            jsonPath("$.data.recent7DayAverage") { value(0.0) }
+            jsonPath("$.data.differenceFromAverage") { value(0.0) }
+            jsonPath("$.data.changeRatePercent") { doesNotExist() }
+        }
+    }
+
     /** 한 테스트 사용자를 소셜 로그인시키고 보호 API 호출에 필요한 Access Token만 반환한다. */
     private fun login(token: String, subject: String): String {
         given(socialTokenVerifierRegistry.verify(SocialProvider.GOOGLE, token)).willReturn(
@@ -250,7 +379,11 @@ class StepRecordControllerIntegrationTests {
     }
 
     /** 사용자 분리 테스트에서 한 날짜 기록을 만드는 반복 HTTP 요청이다. */
-    private fun saveOneDay(accessToken: String, stepCount: Int) {
+    private fun saveOneDay(
+        accessToken: String,
+        stepCount: Int,
+        recordDate: String = "2026-09-02",
+    ) {
         mockMvc.put("/api/v1/steps/daily-records/sync") {
             header("Authorization", "Bearer $accessToken")
             contentType = MediaType.APPLICATION_JSON
@@ -259,9 +392,9 @@ class StepRecordControllerIntegrationTests {
                 {
                   "records": [
                     {
-                      "recordDate": "2026-09-02",
+                      "recordDate": "$recordDate",
                       "stepCount": $stepCount,
-                      "measuredAt": "2026-09-02T15:00:00+09:00"
+                      "measuredAt": "${recordDate}T15:00:00+09:00"
                     }
                   ]
                 }
@@ -271,4 +404,3 @@ class StepRecordControllerIntegrationTests {
         }
     }
 }
-

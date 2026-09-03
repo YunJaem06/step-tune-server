@@ -15,3 +15,7 @@ class InvalidStepRecordDateException(parameterName: String) :
 /** 기간의 시작일/종료일 순서가 잘못됐거나 허용한 최대 조회 기간을 넘었을 때 발생한다. */
 class InvalidStepRecordRangeException :
     RuntimeException("Step record range must be ordered and no longer than 366 days")
+
+/** 통계 기준 날짜의 걸음 기록이 없어 먼저 Android 동기화가 필요할 때 발생한다. */
+class StepRecordNotFoundException(recordDate: String) :
+    RuntimeException("Step record not found: $recordDate")
