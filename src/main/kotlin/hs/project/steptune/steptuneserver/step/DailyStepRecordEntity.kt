@@ -16,7 +16,7 @@ import java.time.LocalDate
 
 /**
  * 한 사용자의 하루 총걸음 수를 저장하는 JPA 엔티티다.
- * 앱이 보내는 값은 걸음 증분이 아니라 해당 날짜의 최신 총합이므로 재동기화할 때 값을 교체한다.
+ * 앱이 보내는 값은 걸음 증분이 아니라 해당 날짜의 누적 총합이며 서버는 관측한 가장 큰 총합을 유지한다.
  */
 @Entity
 @Table(
@@ -45,7 +45,7 @@ class DailyStepRecordEntity(
     @Column(name = "record_date", nullable = false)
     var recordDate: LocalDate,
 
-    /** 해당 날짜의 최신 하루 총걸음 수이며 음수는 허용하지 않는다. */
+    /** 해당 날짜에 서버가 관측한 가장 큰 하루 총걸음 수이며 음수는 허용하지 않는다. */
     @Column(name = "step_count", nullable = false)
     var stepCount: Int,
 
@@ -61,4 +61,3 @@ class DailyStepRecordEntity(
     @Column(name = "updated_at", nullable = false)
     var updatedAt: Instant = Instant.now(),
 )
-

@@ -31,7 +31,7 @@ data class DailyStepRecordWriteRequest(
 data class DailyStepRecordData(
     /** 사용자의 현지 집계 날짜다. */
     val recordDate: LocalDate,
-    /** 그 날짜에 저장된 최신 총걸음 수다. */
+    /** 그 날짜에 서버가 저장한 가장 큰 누적 총걸음 수다. */
     val stepCount: Int,
     /** 앱에서 마지막으로 측정한 시각이다. */
     val measuredAt: Instant,

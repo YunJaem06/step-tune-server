@@ -25,8 +25,8 @@ class StepRecordService(
     private val clock: Clock = Clock.systemUTC()
 
     /**
-     * 요청 날짜들을 한 트랜잭션에서 신규 생성하거나 기존 행에 최신 총걸음 값으로 갱신한다.
-     * `사용자+날짜` 유일 제약과 사용자 행 잠금으로 중복 요청에도 한 날짜당 한 행만 유지한다.
+     * 요청 날짜들을 한 트랜잭션에서 신규 생성하거나 기존 행보다 큰 총걸음 값으로 갱신한다.
+     * `사용자+날짜` 유일 제약과 사용자 행 잠금으로 한 날짜당 한 행만 유지하고 오래된 요청의 값 감소를 막는다.
      */
     @Transactional
     fun syncDailyRecords(userId: Long, request: SyncDailyStepRecordsRequest): DailyStepRecordSyncData {
@@ -56,11 +56,13 @@ class StepRecordService(
                     updatedAt = now,
                 )
             } else {
-                // 이미 있는 날짜라면 증분을 더하지 않고 Android가 보낸 최신 하루 총합으로 교체한다.
+                // 두 Android 동기화가 엇갈려 도착할 수 있으므로 기존 총합보다 큰 값만 최신 측정값으로 반영한다.
                 existing.apply {
-                    stepCount = requested.stepCount
-                    measuredAt = requested.measuredAt.toInstant()
-                    updatedAt = now
+                    if (requested.stepCount > stepCount) {
+                        stepCount = requested.stepCount
+                        measuredAt = requested.measuredAt.toInstant()
+                        updatedAt = now
+                    }
                 }
             }
         }
