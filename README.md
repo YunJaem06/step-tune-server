@@ -341,7 +341,7 @@ Authorization: Bearer Step-Tune-Access-Token
 평균이 0이면 0으로 나눌 수 없으므로 `changeRatePercent`는 `null`입니다. 기준일 기록이 아직 없으면
 Android가 걸음을 먼저 동기화할 수 있도록 `404 Not Found`를 반환합니다.
 
-### AI 음악 추천 생성 계약
+### AI 음악 추천 생성 (Gemini)
 
 Android는 걸음 동기화가 끝난 뒤 원하는 분위기, 장르, 재생 시간을 선택해 음악 추천을 요청합니다.
 `userId`와 `stepCount`는 요청에 넣지 않고 서버가 Access Token과 저장된 걸음 기록에서 확인합니다.
@@ -379,20 +379,13 @@ Content-Type: application/json
       "changeRatePercent": 66.67
     },
     "activityLevel": "HIGH",
-    "musicMoods": ["ENERGETIC", "LIVELY"],
-    "genres": ["HIP_HOP", "POP"],
     "durationMinutes": 30,
-    "reason": "오늘은 평소보다 활동량이 많아 활기찬 곡을 추천했어요.",
-    "searchQueries": [
-      {
-        "provider": "YOUTUBE",
-        "query": "energetic hip hop running playlist"
-      },
-      {
-        "provider": "SPOTIFY",
-        "query": "upbeat pop workout playlist"
-      }
-    ],
+    "reason": "오늘 걸음이 최근 평균보다 많고 활기찬 팝을 선호해 BTS의 Dynamite를 추천했어요.",
+    "track": {
+      "title": "Dynamite",
+      "artist": "BTS",
+      "searchQuery": "BTS Dynamite official audio"
+    },
     "generatedAt": "2026-09-03T06:30:00Z"
   }
 }
@@ -400,16 +393,81 @@ Content-Type: application/json
 
 `recommendationId`는 서버 DB의 숫자 PK가 아니라 요청마다 발급하는 UUID 문자열입니다. 서버는 추천 결과를
 저장하지 않으며 Android가 응답을 Room에 보관합니다. `activityLevel`은 `LOW`, `MODERATE`, `HIGH` 중 하나이고,
-`searchQueries`는 실제 곡 목록 대신 Android가 YouTube·Spotify 검색 화면을 여는 데 사용하는 검색어입니다.
+`track`에는 Gemini가 고른 정확히 한 곡만 들어갑니다. `searchQuery`는 Gemini의 자유 형식 문장이 아니라 서버가
+`artist + title + official audio`로 조립하므로 Android는 이 값을 URL 인코딩해 YouTube 검색에 사용합니다.
 
-기준 날짜의 걸음 기록이 없으면 `404 Not Found`입니다. 현재 단계에서는 성공 응답 계약과 검증만 확정했고
-실제 AI 추천 Service가 아직 연결되지 않았으므로, 걸음 기록이 있는 유효한 실행 요청은
-`503 Service Unavailable`을 반환합니다. 다음 단계에서 AI Service를 구현하면 성공 응답으로 교체됩니다.
+기준 날짜의 걸음 기록이 없으면 `404 Not Found`입니다. 실제 추천은 Gemini가 생성하며 별도의 음악 검색 API는
+호출하지 않습니다. 따라서 Gemini에 실제 발매곡만 고르도록 지시하지만 곡 존재를 100% 검증하려면 추후 음악
+카탈로그 API가 필요합니다. Android는 응답의 검색어로 YouTube 검색 화면을 열고 결과 기록을 Room에 보관합니다.
+
+#### 무료 등급 연결 준비
+
+1. [Google AI Studio](https://aistudio.google.com/)에 로그인하고 무료 테스트용 프로젝트/API 키를 만듭니다.
+2. 해당 프로젝트의 Billing Tier가 **Free Tier**인지 확인합니다. 무료로만 테스트하려면 결제 계정을 연결하거나
+   `Set up billing`/유료 업그레이드를 진행하지 않습니다. Google 로그인용 OAuth Client ID와 Gemini API 키는 별개입니다.
+3. IntelliJ `Run → Edit Configurations → StepTuneServerApplication → Environment variables`에 아래 값을 추가합니다.
+   각 항목의 이름은 Name, 값은 같은 행의 Value 칸에 입력하며 따옴표는 넣지 않습니다.
+
+```text
+GEMINI_ENABLED=true
+GEMINI_API_KEY=AI-Studio에서-발급한-서버용-키
+GEMINI_MODEL=gemini-3.5-flash-lite
+```
+
+4. 서버를 재시작하고, 테스트 계정의 걸음을 먼저 동기화한 뒤 추천 API를 요청합니다.
+5. 테스트가 끝나면 `GEMINI_ENABLED=false`로 변경하고 재시작하면 추천의 외부 호출을 중단할 수 있습니다.
+
+`GEMINI_ENABLED` 기본값은 `false`입니다. 키가 없거나 비활성 상태여도 로그인/걸음 API는 실행되고 추천만 503을
+반환합니다. 모델 이름은 환경변수로 바꿀 수 있지만 모델별 지원/무료 할당량은 AI Studio에서 확인해야 합니다.
+2026-09-04 확인 기준 기본 모델은 무료 등급을 지원합니다. 이 서버 설정 자체가 무료 과금 상태를 보장하지는 않습니다.
+무료 한도/모델 제공 정책은 바뀔 수 있습니다.
+
+- [Gemini 공식 가격](https://ai.google.dev/gemini-api/docs/pricing)
+- [무료/유료 등급 안내](https://ai.google.dev/gemini-api/docs/billing)
+- [계정별 호출 한도](https://ai.google.dev/gemini-api/docs/rate-limits)
+- [JSON 구조화 출력](https://ai.google.dev/gemini-api/docs/structured-output)
+
+#### 처리 구조와 안전장치
+
+- `MusicRecommendationService`가 JWT 사용자 ID로 통계를 읽습니다. `StepStatisticsService`의 읽기 트랜잭션은
+  조회 후 종료되며 Gemini 응답을 기다리는 동안 DB 커넥션을 점유하지 않습니다.
+- `GeminiMusicRecommendationClient`가 집계 통계, 선호 분위기/장르, 희망 시간을 한 번 전송합니다.
+  사용자 ID, 날짜, 닉네임, 이메일, JWT, 원본 일별 기록은 전송하지 않습니다.
+- Gemini는 활동 수준, 실제 발매된 한 곡의 제목·가수, 걸음 통계와 선호를 반영한 짧은 한국어 설명만 생성합니다.
+  플레이리스트·믹스·여러 후보·URL은 요청하지 않으며 걸음으로 실제 감정이나 건강을 단정하지 않게 지시합니다.
+- JSON Schema와 서버 검증을 함께 사용합니다. enum/필수 필드/한 곡 구조/문자열 길이/URL·HTML 여부를 검사합니다.
+  YouTube 검색어는 검증된 가수와 곡명으로 서버가 조립합니다. 곡의 실제 발매 여부와 음악적 품질까지 Gemini만으로
+  완전히 보장할 수는 없습니다.
+- UUID, 기준일, 통계, 희망 시간, 생성 시각은 서버가 직접 조립합니다. 추천용 Entity/Repository/DB 테이블은 없습니다.
+- 연결 제한은 5초, 응답 대기는 기본 30초(`GEMINI_READ_TIMEOUT_SECONDS`로 변경), 출력 상한은 2,048토큰,
+  HTTP 응답 상한은 64KiB입니다. 자동 재시도/유료 모델 대체/웹 검색 도구는 사용하지 않습니다.
+- API 키는 요청 헤더로만 전송합니다. 키와 프롬프트/응답 본문은 앱 응답이나 서버 로그에 출력하지 않습니다.
+  키는 Git/Android/채팅에 넣지 말고 서버 환경변수에만 보관합니다.
+
+무료 Gemini 서비스는 입력/응답이 제품 개선에 사용되거나 검토될 수 있습니다. 처음에는 합성 테스트 기록을 사용하고,
+실제 개인정보/민감정보를 전송하지 마세요. 식별자를 빼는 것만으로 모든 데이터가 완전히 익명화되는 것은 아닙니다.
+[Gemini 데이터 처리 약관](https://ai.google.dev/gemini-api/terms)을 확인한 뒤 실제 데이터로 테스트하세요.
+
+| HTTP 상태 | 의미 | Android 처리 |
+| --- | --- | --- |
+| 200 | 검증된 한 곡 추천 생성 성공 | Room 저장 및 YouTube 검색 화면 연결 |
+| 400 | 잘못된 요청 조건 | 입력값 수정 |
+| 401 | Step Tune 인증 실패 | 기존 토큰 갱신/로그인 처리 |
+| 404 | 사용자 또는 기준일 걸음 없음 | 걸음 동기화/계정 상태 확인 |
+| 429 | Gemini 호출 한도 초과 | 반복 호출하지 말고 나중에 다시 시도 |
+| 502 | 잘린 응답/차단/잘못된 추천 JSON | 안내 후 사용자가 다시 시도 |
+| 503 | AI 비활성/키 누락/외부 연결·설정 문제 | 서버 설정 확인; 자동 로그아웃하지 않음 |
+
+Google의 키 오류(401/403)는 Step Tune 토큰 오류가 아니므로 앱에는 503으로 변환합니다.
+실제 AI 호출 테스트는 키 발급과 Free Tier 확인 후에 별도로 진행해야 합니다.
 
 ## 검증
 
 ```powershell
 .\gradlew.bat test
 ```
+
+Gemini HTTP/서비스/계약 테스트는 MockRestServiceServer와 가짜 AI 응답, H2만 사용합니다.
+테스트 실행에는 실제 Gemini 키가 필요 없으며 외부 AI 호출/과금이 발생하지 않습니다.
 
 Windows 사용자 경로에 한글이 포함된 환경에서 Gradle 9.5.1 테스트 실행기의 Java 인자 파일이 깨지면, 프로젝트와 Gradle 캐시를 영문 경로로 옮기거나 임시 ASCII 드라이브 경로에서 테스트를 실행해야 할 수 있습니다.
