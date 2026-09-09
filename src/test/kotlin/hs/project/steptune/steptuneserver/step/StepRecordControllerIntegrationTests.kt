@@ -29,6 +29,8 @@ import kotlin.test.assertEquals
         "spring.datasource.url=jdbc:h2:mem:step_tune_steps;MODE=MySQL;DB_CLOSE_DELAY=-1",
         "app.auth.google-client-id=test.apps.googleusercontent.com",
         "app.auth.jwt-secret=0123456789abcdef0123456789abcdef",
+        // 개발 PC에 실제 키가 있어도 이 테스트에서는 외부 AI를 호출하지 않는다.
+        "app.gemini.enabled=false",
     ],
 )
 @AutoConfigureMockMvc
@@ -339,7 +341,7 @@ class StepRecordControllerIntegrationTests {
         }
     }
 
-    /** 실제 추천 엔진 연결 전에도 기준일 걸음 누락과 기능 준비 상태를 서로 다른 오류로 반환하는지 검증한다. */
+    /** AI를 꺼 둔 경우에도 기준일 걸음 누락과 비활성 상태를 서로 다른 오류로 반환하는지 검증한다. */
     @Test
     fun `recommendation contract checks step record before unavailable engine`() {
         val accessToken = login("pending-recommendation-token", "pending-recommendation-subject")
@@ -365,7 +367,7 @@ class StepRecordControllerIntegrationTests {
 
         saveOneDay(accessToken, 5000, "2026-09-03")
 
-        // 걸음은 준비됐지만 아직 AI 추천 Service가 없으므로 가짜 성공 데이터 대신 503을 반환한다.
+        // 걸음은 준비됐지만 테스트 설정에서 AI를 껐으므로 가짜 성공 데이터 대신 503을 반환한다.
         mockMvc.post("/api/v1/music-recommendations/generate") {
             header("Authorization", "Bearer $accessToken")
             contentType = MediaType.APPLICATION_JSON

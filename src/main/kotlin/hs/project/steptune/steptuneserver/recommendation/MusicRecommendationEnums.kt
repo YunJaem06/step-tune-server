@@ -27,9 +27,3 @@ enum class RecommendationActivityLevel {
     MODERATE,
     HIGH,
 }
-
-/** Android가 추천 검색어를 열어 볼 수 있는 외부 음악 검색 대상이다. */
-enum class MusicSearchProvider {
-    YOUTUBE,
-    SPOTIFY,
-}

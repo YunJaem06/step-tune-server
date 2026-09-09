@@ -5,6 +5,8 @@ import hs.project.steptune.steptuneserver.auth.SocialProviderNotConfiguredExcept
 import hs.project.steptune.steptuneserver.auth.SocialVerificationUnavailableException
 import hs.project.steptune.steptuneserver.auth.UserNotFoundException
 import hs.project.steptune.steptuneserver.recommendation.MusicRecommendationUnavailableException
+import hs.project.steptune.steptuneserver.recommendation.MusicRecommendationInvalidResponseException
+import hs.project.steptune.steptuneserver.recommendation.MusicRecommendationRateLimitException
 import hs.project.steptune.steptuneserver.step.DuplicateStepRecordDateException
 import hs.project.steptune.steptuneserver.step.InvalidStepCountException
 import hs.project.steptune.steptuneserver.step.InvalidStepRecordDateException
@@ -88,12 +90,22 @@ class ApiExceptionHandler {
     ): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.NOT_FOUND, exception.message ?: "Step record not found")
 
-    /** 실제 AI 추천 Service가 연결되기 전 추천 요청은 성공으로 위장하지 않고 503으로 응답한다. */
+    /** AI 비활성/키 누락/외부 장애는 기존 추천 오류 계약인 503으로 응답한다. */
     @ExceptionHandler(MusicRecommendationUnavailableException::class)
     fun handleMusicRecommendationUnavailable(
         exception: MusicRecommendationUnavailableException,
     ): ResponseEntity<ApiResponse<Nothing>> =
         error(HttpStatus.SERVICE_UNAVAILABLE, exception.message ?: "Music recommendation is unavailable")
+
+    /** 외부 무료/유료 사용량 한도 초과를 앱에서 구분할 수 있도록 429로 반환한다. */
+    @ExceptionHandler(MusicRecommendationRateLimitException::class)
+    fun handleMusicRecommendationRateLimit(): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.TOO_MANY_REQUESTS, "Music recommendation quota exceeded; please try again later")
+
+    /** 외부 AI 응답을 검증하지 못하면 내용을 노출하거나 성공으로 위장하지 않고 502로 반환한다. */
+    @ExceptionHandler(MusicRecommendationInvalidResponseException::class)
+    fun handleMusicRecommendationInvalidResponse(): ResponseEntity<ApiResponse<Nothing>> =
+        error(HttpStatus.BAD_GATEWAY, "Music recommendation engine returned an invalid response")
 
     /** @Valid와 Bean Validation에서 잡힌 빈 필드 등은 첫 번째 오류를 400으로 반환한다. */
     @ExceptionHandler(MethodArgumentNotValidException::class)

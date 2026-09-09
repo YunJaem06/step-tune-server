@@ -37,7 +37,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     // Bearer JWT를 검증해 보호 API의 사용자를 인증한다.
     implementation("org.springframework.boot:spring-boot-starter-oauth2-resource-server")
-    // Kakao/Naver 외부 인증 API를 호출하는 RestClient를 제공한다.
+    // Kakao/Naver 외부 인증 API와 Gemini 추천 API를 호출하는 RestClient를 제공한다.
     implementation("org.springframework.boot:spring-boot-starter-restclient")
     // URL 접근 제어와 인증 필터 체인을 제공한다.
     implementation("org.springframework.boot:spring-boot-starter-security")

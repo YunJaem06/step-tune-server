@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.BDDMockito.given
+import org.mockito.Mockito.doThrow
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -37,7 +38,7 @@ class MusicRecommendationControllerContractTests {
     @MockitoBean
     lateinit var socialTokenVerifierRegistry: SocialTokenVerifierRegistry
 
-    /** 아직 구현하지 않은 AI 계층 대신 고정된 추천 결과를 반환한다. */
+    /** 실제 AI 호출 없이 HTTP 계약만 고정된 추천 결과로 검증한다. */
     @MockitoBean
     lateinit var generateMusicRecommendationUseCase: GenerateMusicRecommendationUseCase
 
@@ -76,7 +77,7 @@ class MusicRecommendationControllerContractTests {
         given(
             generateMusicRecommendationUseCase.generate(
                 anyLong(),
-                any(GenerateMusicRecommendationRequest::class.java),
+                anyRecommendationRequest(),
             ),
         ).willReturn(recommendationData())
 
@@ -100,16 +101,15 @@ class MusicRecommendationControllerContractTests {
             jsonPath("$.data.stepSummary.todayStepCount") { value(5000) }
             jsonPath("$.data.stepSummary.recent7DayAverage") { value(3000.0) }
             jsonPath("$.data.activityLevel") { value("HIGH") }
-            jsonPath("$.data.musicMoods[0]") { value("ENERGETIC") }
-            jsonPath("$.data.musicMoods[1]") { value("LIVELY") }
-            jsonPath("$.data.genres[0]") { value("HIP_HOP") }
             jsonPath("$.data.durationMinutes") { value(30) }
-            jsonPath("$.data.reason") { value("오늘은 평소보다 활동량이 많아 활기찬 곡을 추천했어요.") }
-            jsonPath("$.data.searchQueries[0].provider") { value("YOUTUBE") }
-            jsonPath("$.data.searchQueries[0].query") { value("energetic hip hop running playlist") }
-            jsonPath("$.data.searchQueries[1].provider") { value("SPOTIFY") }
-            jsonPath("$.data.searchQueries[1].query") { value("upbeat pop workout playlist") }
+            jsonPath("$.data.reason") { value("오늘은 평소보다 활동량이 많아 선호 장르에 맞는 Dynamite를 추천했어요.") }
+            jsonPath("$.data.track.title") { value("Dynamite") }
+            jsonPath("$.data.track.artist") { value("BTS") }
+            jsonPath("$.data.track.searchQuery") { value("BTS Dynamite official audio") }
             jsonPath("$.data.tracks") { doesNotExist() }
+            jsonPath("$.data.searchQueries") { doesNotExist() }
+            jsonPath("$.data.musicMoods") { doesNotExist() }
+            jsonPath("$.data.genres") { doesNotExist() }
             jsonPath("$.data.preferredMoods") { doesNotExist() }
             jsonPath("$.data.preferredGenres") { doesNotExist() }
             jsonPath("$.data.generatedAt") { value("2026-09-03T06:30:00Z") }
@@ -150,6 +150,35 @@ class MusicRecommendationControllerContractTests {
         }
     }
 
+    /** AI 설정 누락/한도 초과/잘못된 응답도 code/message/data 형식을 유지하는지 검증한다. */
+    @Test
+    fun `recommendation errors use common API envelope`() {
+        val accessToken = login()
+        listOf(
+            MusicRecommendationUnavailableException() to 503,
+            MusicRecommendationRateLimitException() to 429,
+            MusicRecommendationInvalidResponseException() to 502,
+        ).forEach { (exception, expectedStatus) ->
+            doThrow(exception).`when`(generateMusicRecommendationUseCase)
+                .generate(anyLong(), anyRecommendationRequest())
+            mockMvc.post("/api/v1/music-recommendations/generate") {
+                header("Authorization", "Bearer $accessToken")
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"recordDate":"2026-09-03"}"""
+            }.andExpect {
+                status { isEqualTo(expectedStatus) }
+                jsonPath("$.code") { value(expectedStatus) }
+                jsonPath("$.message") { isNotEmpty() }
+                jsonPath("$.data") { value(null) }
+            }
+        }
+    }
+
+    /** Mockito any가 반환하는 null 때문에 Kotlin의 non-null 인자 검사가 실패하지 않도록 테스트 값을 제공한다. */
+    private fun anyRecommendationRequest(): GenerateMusicRecommendationRequest =
+        any(GenerateMusicRecommendationRequest::class.java)
+            ?: GenerateMusicRecommendationRequest(LocalDate.of(2026, 9, 3))
+
     /** 테스트 사용자를 소셜 로그인시키고 추천 보호 API에 사용할 Access Token을 반환한다. */
     private fun login(): String {
         given(socialTokenVerifierRegistry.verify(SocialProvider.GOOGLE, "recommendation-token")).willReturn(
@@ -183,19 +212,12 @@ class MusicRecommendationControllerContractTests {
             changeRatePercent = BigDecimal("66.67"),
         ),
         activityLevel = RecommendationActivityLevel.HIGH,
-        musicMoods = listOf(MusicMood.ENERGETIC, MusicMood.LIVELY),
-        genres = listOf(MusicGenre.HIP_HOP, MusicGenre.POP),
         durationMinutes = 30,
-        reason = "오늘은 평소보다 활동량이 많아 활기찬 곡을 추천했어요.",
-        searchQueries = listOf(
-            MusicSearchQueryData(
-                provider = MusicSearchProvider.YOUTUBE,
-                query = "energetic hip hop running playlist",
-            ),
-            MusicSearchQueryData(
-                provider = MusicSearchProvider.SPOTIFY,
-                query = "upbeat pop workout playlist",
-            ),
+        reason = "오늘은 평소보다 활동량이 많아 선호 장르에 맞는 Dynamite를 추천했어요.",
+        track = RecommendedTrackData(
+            title = "Dynamite",
+            artist = "BTS",
+            searchQuery = "BTS Dynamite official audio",
         ),
         generatedAt = Instant.parse("2026-09-03T06:30:00Z"),
     )

@@ -17,7 +17,7 @@ data class GenerateMusicRecommendationRequest(
     /** 선호 장르는 선택 사항이고 한 요청에 최대 3개까지 허용한다. */
     @field:Size(max = 3)
     val preferredGenres: List<MusicGenre> = emptyList(),
-    /** 너무 짧거나 긴 추천 목록이 생성되지 않게 10분에서 120분으로 제한한다. */
+    /** 사용자가 음악을 들을 세션 길이이며 10분에서 120분으로 제한한다. 한 곡의 재생 길이라는 뜻은 아니다. */
     @field:Min(10)
     @field:Max(120)
     val durationMinutes: Int = 30,
@@ -37,12 +37,14 @@ data class RecommendationStepSummaryData(
     val changeRatePercent: BigDecimal?,
 )
 
-/** 실제 곡 API 대신 Android가 YouTube·Spotify 검색 화면을 열 때 사용할 검색어다. */
-data class MusicSearchQueryData(
-    /** 이 검색어를 사용할 외부 서비스다. */
-    val provider: MusicSearchProvider,
-    /** AI가 걸음 통계와 음악 취향을 반영해 만든 검색 문자열이다. */
-    val query: String,
+/** Gemini가 추천한 정확히 한 곡과 Android가 YouTube 검색에 사용할 값을 묶는다. */
+data class RecommendedTrackData(
+    /** 실제 발매된 곡의 제목이다. */
+    val title: String,
+    /** 해당 곡의 대표 가수 또는 아티스트명이다. */
+    val artist: String,
+    /** AI 자유 문장이 아니라 서버가 artist + title + official audio 형식으로 만든 검색어다. */
+    val searchQuery: String,
 )
 
 /** 서버가 저장하지 않고 Android Room에 바로 보관할 수 있도록 완성된 AI 추천 결과를 반환한다. */
@@ -55,16 +57,12 @@ data class MusicRecommendationData(
     val stepSummary: RecommendationStepSummaryData,
     /** AI가 기준일 걸음과 최근 평균을 비교해 분류한 활동 수준이다. */
     val activityLevel: RecommendationActivityLevel,
-    /** 사용자 취향과 활동량을 바탕으로 AI가 선택한 추천 음악 분위기다. */
-    val musicMoods: List<MusicMood>,
-    /** 사용자 취향과 활동량을 바탕으로 AI가 선택한 추천 장르다. */
-    val genres: List<MusicGenre>,
     /** 요청한 추천 재생 시간이다. */
     val durationMinutes: Int,
     /** AI가 걸음 통계와 취향을 바탕으로 작성한 짧은 추천 설명이다. */
     val reason: String,
-    /** Android가 외부 앱이나 브라우저 검색으로 연결할 YouTube·Spotify 검색어 목록이다. */
-    val searchQueries: List<MusicSearchQueryData>,
+    /** Gemini가 조건에 맞춰 고른 한 곡이다. 한 응답에 목록이나 플레이리스트를 포함하지 않는다. */
+    val track: RecommendedTrackData,
     /** 추천 결과가 서버에서 생성된 UTC 시각이다. */
     val generatedAt: Instant,
 )
